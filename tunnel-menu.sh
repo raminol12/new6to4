@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
+
+# Strict mode (portable)
+set -eu
+# Enable pipefail if supported (bash usually supports it; this avoids "invalid option name" errors)
+(set -o pipefail) 2>/dev/null && set -o pipefail
 
 RC_LOCAL="/etc/rc.local"
 RC_LOCAL_SERVICE="/etc/systemd/system/rc-local.service"
@@ -13,13 +17,14 @@ require_root() {
 }
 
 get_local_ipv4() {
+  # Best-effort to detect primary public IPv4
   local ip=""
   ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1 || true)"
   if [[ -z "$ip" ]]; then
     ip="$(ip -4 addr show scope global 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
   fi
   if [[ -z "$ip" ]]; then
-    echo "ERROR: Could not detect the server's IPv4 automatically."
+    echo "ERROR: Could not detect server IPv4 automatically."
     exit 1
   fi
   echo "$ip"
@@ -40,6 +45,7 @@ EOF
     chmod +x "$RC_LOCAL"
   fi
 
+  # Create/enable rc-local systemd unit if systemd exists
   if command -v systemctl >/dev/null 2>&1; then
     if [[ ! -f "$RC_LOCAL_SERVICE" ]]; then
       cat > "$RC_LOCAL_SERVICE" <<'EOF'
@@ -166,7 +172,7 @@ ping_quiet() {
 }
 
 status_check() {
-  # Only print ONLINE or OFFLINE (based on ping to BOTH sides)
+  # Print ONLY ONLINE / OFFLINE
   if ping_quiet 10.10.187.1 && ping_quiet 10.10.187.2; then
     echo "ONLINE"
   else
@@ -191,7 +197,6 @@ menu() {
 
     case "${choice}" in
       1)
-        local iran_ip foreign_ip ssh_port
         iran_ip="$(get_local_ipv4)"
         echo "Detected Iran server IP (local): ${iran_ip}"
         read -rp "Enter Foreign server IP: " foreign_ip
@@ -208,7 +213,6 @@ menu() {
         reboot_now
         ;;
       2)
-        local foreign_ip iran_ip
         foreign_ip="$(get_local_ipv4)"
         echo "Detected Foreign server IP (local): ${foreign_ip}"
         read -rp "Enter Iran server IP: " iran_ip
