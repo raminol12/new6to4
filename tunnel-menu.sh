@@ -16,6 +16,28 @@ require_root() {
   fi
 }
 
+# ---- Colors (auto-disable if not supported) ----
+use_color=0
+if [[ -t 1 ]] && command -v tput >/dev/null 2>&1; then
+  if [[ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]]; then
+    use_color=1
+  fi
+fi
+
+if [[ "$use_color" -eq 1 ]]; then
+  C_RESET="$(tput sgr0)"
+  C_BOLD="$(tput bold)"
+  C_RED="$(tput setaf 1)"
+  C_GREEN="$(tput setaf 2)"
+  C_YELLOW="$(tput setaf 3)"
+  C_BLUE="$(tput setaf 4)"
+  C_MAGENTA="$(tput setaf 5)"
+  C_CYAN="$(tput setaf 6)"
+  C_WHITE="$(tput setaf 7)"
+else
+  C_RESET=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_MAGENTA=""; C_CYAN=""; C_WHITE=""
+fi
+
 get_local_ipv4() {
   local ip=""
   ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -n1 || true)"
@@ -23,7 +45,7 @@ get_local_ipv4() {
     ip="$(ip -4 addr show scope global 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1 || true)"
   fi
   if [[ -z "$ip" ]]; then
-    echo "ERROR: Could not detect server IPv4 automatically."
+    echo "${C_RED}ERROR:${C_RESET} Could not detect server IPv4 automatically."
     exit 1
   fi
   echo "$ip"
@@ -105,7 +127,7 @@ exit 0
 EOFRC
 
   chmod +x "$RC_LOCAL"
-  echo "OK: Iran configuration written to $RC_LOCAL"
+  echo "${C_GREEN}OK:${C_RESET} Iran configuration written to ${C_CYAN}$RC_LOCAL${C_RESET}"
 }
 
 write_rc_local_foreign() {
@@ -137,11 +159,11 @@ exit 0
 EOFRC
 
   chmod +x "$RC_LOCAL"
-  echo "OK: Foreign configuration written to $RC_LOCAL"
+  echo "${C_GREEN}OK:${C_RESET} Foreign configuration written to ${C_CYAN}$RC_LOCAL${C_RESET}"
 }
 
 reboot_now() {
-  echo "Rebooting now..."
+  echo "${C_YELLOW}Rebooting now...${C_RESET}"
   sleep 2
   reboot
 }
@@ -152,40 +174,46 @@ ping_quiet() {
 }
 
 status_check() {
-  # Print ONLY ONLINE / OFFLINE (requires BOTH pings to succeed)
+  # Print ONLY ONLINE / OFFLINE
   if ping_quiet 10.10.187.1 && ping_quiet 10.10.187.2; then
-    echo "ONLINE"
+    echo "${C_GREEN}${C_BOLD}ONLINE${C_RESET}"
   else
-    echo "OFFLINE"
+    echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"
   fi
+}
+
+print_banner() {
+  echo "${C_CYAN}======================================${C_RESET}"
+  echo "${C_BOLD}${C_MAGENTA}   Tunnel Menu (Iran <-> Foreign)${C_RESET}"
+  echo "${C_CYAN}======================================${C_RESET}"
+  echo "${C_YELLOW}${C_BOLD}   Developer:${C_RESET} ${C_WHITE}Telegram${C_RESET} ${C_GREEN}@mrraminol${C_RESET}"
+  echo "${C_CYAN}--------------------------------------${C_RESET}"
 }
 
 menu() {
   while true; do
     clear || true
-    echo "======================================"
-    echo "  Tunnel Menu (Iran <-> Foreign)"
-    echo "======================================"
-    echo "1) Setup on Iran server"
-    echo "2) Setup on Foreign server"
-    echo "3) Ping 10.10.187.2"
-    echo "4) Ping 10.10.187.1"
-    echo "5) Status (ONLINE/OFFLINE)"
-    echo "0) Exit"
-    echo "--------------------------------------"
+    print_banner
+    echo "${C_WHITE}1)${C_RESET} Setup on Iran server"
+    echo "${C_WHITE}2)${C_RESET} Setup on Foreign server"
+    echo "${C_WHITE}3)${C_RESET} Ping 10.10.187.2"
+    echo "${C_WHITE}4)${C_RESET} Ping 10.10.187.1"
+    echo "${C_WHITE}5)${C_RESET} Status (ONLINE/OFFLINE)"
+    echo "${C_WHITE}0)${C_RESET} Exit"
+    echo "${C_CYAN}--------------------------------------${C_RESET}"
     read -rp "Select an option: " choice
 
     case "${choice}" in
       1)
         local iran_ip foreign_ip ssh_port
         iran_ip="$(get_local_ipv4)"
-        echo "Detected Iran server IP (local): ${iran_ip}"
+        echo "${C_GREEN}Detected Iran server IP (local):${C_RESET} ${C_CYAN}${iran_ip}${C_RESET}"
         read -rp "Enter Foreign server IP: " foreign_ip
         read -rp "Iran SSH port (default 22): " ssh_port
         ssh_port="${ssh_port:-22}"
 
         if [[ -z "${foreign_ip}" ]]; then
-          echo "ERROR: Foreign IP is empty."
+          echo "${C_RED}ERROR:${C_RESET} Foreign IP is empty."
           read -rp "Press Enter to continue..."
           continue
         fi
@@ -196,11 +224,11 @@ menu() {
       2)
         local foreign_ip iran_ip
         foreign_ip="$(get_local_ipv4)"
-        echo "Detected Foreign server IP (local): ${foreign_ip}"
+        echo "${C_GREEN}Detected Foreign server IP (local):${C_RESET} ${C_CYAN}${foreign_ip}${C_RESET}"
         read -rp "Enter Iran server IP: " iran_ip
 
         if [[ -z "${iran_ip}" ]]; then
-          echo "ERROR: Iran IP is empty."
+          echo "${C_RED}ERROR:${C_RESET} Iran IP is empty."
           read -rp "Press Enter to continue..."
           continue
         fi
@@ -209,12 +237,12 @@ menu() {
         reboot_now
         ;;
       3)
-        echo "Pinging 10.10.187.2 ..."
+        echo "${C_BLUE}Pinging 10.10.187.2 ...${C_RESET}"
         ping -c 4 -W 1 10.10.187.2 || true
         read -rp "Press Enter to continue..."
         ;;
       4)
-        echo "Pinging 10.10.187.1 ..."
+        echo "${C_BLUE}Pinging 10.10.187.1 ...${C_RESET}"
         ping -c 4 -W 1 10.10.187.1 || true
         read -rp "Press Enter to continue..."
         ;;
@@ -226,7 +254,7 @@ menu() {
         exit 0
         ;;
       *)
-        echo "Invalid option!"
+        echo "${C_RED}Invalid option!${C_RESET}"
         sleep 1
         ;;
     esac
