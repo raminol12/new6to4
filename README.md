@@ -1,4 +1,16 @@
-# راهنما (کوتاه)
+
+
+## اجرا (کپی و اجرا)
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/raminol12/new6to4/main/tunnel-menu.sh)
+```
+
+> اگر به خاطر CRLF/ویندوزی بودن فایل خطای `^M` گرفتید، این نسخه را اجرا کنید:
+```bash
+bash <(curl -sL https://raw.githubusercontent.com/raminol12/new6to4/main/tunnel-menu.sh | tr -d '\r')
+```
+
+# راهنما 
 
 ## کارکرد اسکریپت
 این اسکریپت یک منوی مدیریتی برای راه‌اندازی تونل **6to4(SIT)** و **GRE over IPv6 (ip6gre)** بین دو سرور **ایران ↔ خارج** است و تنظیمات را داخل `/etc/rc.local` می‌نویسد تا بعد از ریبوت خودکار اجرا شود.
@@ -29,12 +41,3 @@
 ## پشتیبانی
 Telegram: **@mrraminol**
 
-## اجرا (کپی و اجرا)
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/raminol12/new6to4/main/tunnel-menu.sh)
-```
-
-> اگر به خاطر CRLF/ویندوزی بودن فایل خطای `^M` گرفتید، این نسخه را اجرا کنید:
-```bash
-bash <(curl -sL https://raw.githubusercontent.com/raminol12/new6to4/main/tunnel-menu.sh | tr -d '\r')
-```
