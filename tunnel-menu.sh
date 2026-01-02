@@ -2,7 +2,7 @@
 
 # Strict mode (portable)
 set -eu
-# Enable pipefail if supported; avoid breaking on shells/files with issues
+# Enable pipefail if supported (safe on bash; doesn't crash if not supported)
 (set -o pipefail) 2>/dev/null && set -o pipefail
 
 RC_LOCAL="/etc/rc.local"
@@ -37,16 +37,16 @@ backup_rc_local() {
 
 ensure_rc_local_enabled() {
   if [[ ! -f "$RC_LOCAL" ]]; then
-    cat > "$RC_LOCAL" <<'EOF'
+    cat > "$RC_LOCAL" <<'EORC'
 #!/bin/bash
 exit 0
-EOF
+EORC
     chmod +x "$RC_LOCAL"
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
     if [[ ! -f "$RC_LOCAL_SERVICE" ]]; then
-      cat > "$RC_LOCAL_SERVICE" <<'EOF'
+      cat > "$RC_LOCAL_SERVICE" <<'EOSVC'
 [Unit]
 Description=/etc/rc.local Compatibility
 ConditionPathExists=/etc/rc.local
@@ -62,7 +62,7 @@ GuessMainPID=no
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOSVC
       systemctl daemon-reload
     fi
     systemctl enable rc-local.service >/dev/null 2>&1 || true
@@ -77,7 +77,7 @@ write_rc_local_iran() {
   backup_rc_local
   ensure_rc_local_enabled
 
-  cat > "$RC_LOCAL" <<EOF
+  cat > "$RC_LOCAL" <<EOFRC
 #! /bin/bash
 
 # Cleanup old tunnels (ignore errors)
@@ -102,7 +102,7 @@ iptables -t nat -A PREROUTING -j DNAT --to-destination 10.10.187.2
 iptables -t nat -A POSTROUTING -j MASQUERADE
 
 exit 0
-EOF
+EOFRC
 
   chmod +x "$RC_LOCAL"
   echo "OK: Iran configuration written to $RC_LOCAL"
@@ -115,7 +115,7 @@ write_rc_local_foreign() {
   backup_rc_local
   ensure_rc_local_enabled
 
-  cat > "$RC_LOCAL" <<EOF
+  cat > "$RC_LOCAL" <<EOFRC
 #! /bin/bash
 
 # Cleanup old tunnels (ignore errors)
@@ -134,7 +134,7 @@ ip link set GRE6Tun_Forign mtu 1436
 ip link set GRE6Tun_Forign up
 
 exit 0
-EOF
+EOFRC
 
   chmod +x "$RC_LOCAL"
   echo "OK: Foreign configuration written to $RC_LOCAL"
@@ -152,7 +152,7 @@ ping_quiet() {
 }
 
 status_check() {
-  # Print ONLY ONLINE / OFFLINE
+  # Print ONLY ONLINE / OFFLINE (requires BOTH pings to succeed)
   if ping_quiet 10.10.187.1 && ping_quiet 10.10.187.2; then
     echo "ONLINE"
   else
@@ -177,6 +177,7 @@ menu() {
 
     case "${choice}" in
       1)
+        local iran_ip foreign_ip ssh_port
         iran_ip="$(get_local_ipv4)"
         echo "Detected Iran server IP (local): ${iran_ip}"
         read -rp "Enter Foreign server IP: " foreign_ip
@@ -193,6 +194,7 @@ menu() {
         reboot_now
         ;;
       2)
+        local foreign_ip iran_ip
         foreign_ip="$(get_local_ipv4)"
         echo "Detected Foreign server IP (local): ${foreign_ip}"
         read -rp "Enter Iran server IP: " iran_ip
