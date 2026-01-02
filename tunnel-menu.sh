@@ -2,7 +2,6 @@
 
 # Strict mode (portable)
 set -eu
-# Enable pipefail if supported (safe on bash; doesn't crash if not supported)
 (set -o pipefail) 2>/dev/null && set -o pipefail
 
 RC_LOCAL="/etc/rc.local"
@@ -37,6 +36,54 @@ if [[ "$use_color" -eq 1 ]]; then
 else
   C_RESET=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_MAGENTA=""; C_CYAN=""; C_WHITE=""
 fi
+
+# ---- Validation helpers ----
+is_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  local o1 o2 o3 o4
+  IFS='.' read -r o1 o2 o3 o4 <<<"$ip"
+  for o in "$o1" "$o2" "$o3" "$o4"; do
+    [[ "$o" =~ ^[0-9]+$ ]] || return 1
+    (( o >= 0 && o <= 255 )) || return 1
+  done
+  return 0
+}
+
+is_port() {
+  local p="$1"
+  [[ "$p" =~ ^[0-9]+$ ]] || return 1
+  (( p >= 1 && p <= 65535 )) || return 1
+  return 0
+}
+
+prompt_ipv4() {
+  local prompt="$1"
+  local ip=""
+  while true; do
+    read -rp "$prompt" ip
+    if is_ipv4 "$ip"; then
+      echo "$ip"
+      return 0
+    fi
+    echo "${C_RED}ERROR:${C_RESET} Invalid IPv4. Example: 1.2.3.4"
+  done
+}
+
+prompt_port() {
+  local prompt="$1"
+  local default="$2"
+  local p=""
+  while true; do
+    read -rp "$prompt" p
+    p="${p:-$default}"
+    if is_port "$p"; then
+      echo "$p"
+      return 0
+    fi
+    echo "${C_RED}ERROR:${C_RESET} Invalid port. Range: 1-65535"
+  done
+}
 
 get_local_ipv4() {
   local ip=""
@@ -162,24 +209,105 @@ EOFRC
   echo "${C_GREEN}OK:${C_RESET} Foreign configuration written to ${C_CYAN}$RC_LOCAL${C_RESET}"
 }
 
-reboot_now() {
-  echo "${C_YELLOW}Rebooting now...${C_RESET}"
-  sleep 2
-  reboot
-}
-
 ping_quiet() {
   local target="$1"
   ping -c 1 -W 1 "$target" >/dev/null 2>&1
 }
 
+iface_exists() {
+  ip link show dev "$1" >/dev/null 2>&1
+}
+
+iface_up() {
+  ip link show dev "$1" 2>/dev/null | grep -q "state UP"
+}
+
+has_ipv4() {
+  local dev="$1" cidr="$2"
+  ip -4 addr show dev "$dev" 2>/dev/null | grep -q "$cidr"
+}
+
+has_ipv6() {
+  local dev="$1" cidr="$2"
+  ip -6 addr show dev "$dev" 2>/dev/null | grep -q "$cidr"
+}
+
 status_check() {
-  # Print ONLY ONLINE / OFFLINE
+  # Detect which side based on existing interfaces; require interfaces+IPs+ping
+  local side="" six="" gre="" want_v6="" want_v4=""
+
+  if iface_exists "GRE6Tun_iran" || iface_exists "6to4_iran"; then
+    side="IRAN"
+    six="6to4_iran"
+    gre="GRE6Tun_iran"
+    want_v6="2002:a00:100::1/64"
+    want_v4="10.10.187.1/30"
+  elif iface_exists "GRE6Tun_Forign" || iface_exists "6to4_Forign"; then
+    side="FOREIGN"
+    six="6to4_Forign"
+    gre="GRE6Tun_Forign"
+    want_v6="2002:a00:100::2/64"
+    want_v4="10.10.187.2/30"
+  else
+    echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"
+    return 0
+  fi
+
+  # Interface existence
+  iface_exists "$six" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+  iface_exists "$gre" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+
+  # Must be UP
+  iface_up "$six" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+  iface_up "$gre" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+
+  # Must have expected IPs
+  has_ipv6 "$six" "$want_v6" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+  has_ipv4 "$gre" "$want_v4" || { echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"; return 0; }
+
+  # Must ping BOTH ends
   if ping_quiet 10.10.187.1 && ping_quiet 10.10.187.2; then
     echo "${C_GREEN}${C_BOLD}ONLINE${C_RESET}"
   else
     echo "${C_RED}${C_BOLD}OFFLINE${C_RESET}"
   fi
+}
+
+confirm_and_reboot() {
+  local summary="$1"
+  local ans=""
+
+  echo
+  echo "${C_CYAN}--------------------------------------${C_RESET}"
+  echo "${C_BOLD}Summary${C_RESET}"
+  echo "$summary"
+  echo "${C_CYAN}--------------------------------------${C_RESET}"
+  read -rp "Proceed to reboot? [Y/n]: " ans
+  ans="${ans:-Y}"
+
+  if [[ ! "$ans" =~ ^[Yy]$ ]]; then
+    echo "${C_YELLOW}Reboot skipped.${C_RESET}"
+    return 0
+  fi
+
+  echo "${C_YELLOW}Reboot will start in 5 seconds. Press Ctrl+C to cancel...${C_RESET}"
+  local cancelled=0
+  trap 'cancelled=1' INT
+
+  for i in 5 4 3 2 1; do
+    if [[ "$cancelled" -eq 1 ]]; then
+      echo
+      echo "${C_YELLOW}Reboot cancelled. Returning to menu...${C_RESET}"
+      trap - INT
+      return 0
+    fi
+    echo -ne "${C_YELLOW}Rebooting in ${i}...${C_RESET}\r"
+    sleep 1
+  done
+  echo
+
+  trap - INT
+  reboot
 }
 
 print_banner() {
@@ -208,33 +336,31 @@ menu() {
         local iran_ip foreign_ip ssh_port
         iran_ip="$(get_local_ipv4)"
         echo "${C_GREEN}Detected Iran server IP (local):${C_RESET} ${C_CYAN}${iran_ip}${C_RESET}"
-        read -rp "Enter Foreign server IP: " foreign_ip
-        read -rp "Iran SSH port (default 22): " ssh_port
-        ssh_port="${ssh_port:-22}"
 
-        if [[ -z "${foreign_ip}" ]]; then
-          echo "${C_RED}ERROR:${C_RESET} Foreign IP is empty."
-          read -rp "Press Enter to continue..."
-          continue
-        fi
+        foreign_ip="$(prompt_ipv4 "Enter Foreign server IPv4: ")"
+        ssh_port="$(prompt_port "Iran SSH port (default 22): " "22")"
 
         write_rc_local_iran "$foreign_ip" "$iran_ip" "$ssh_port"
-        reboot_now
+
+        confirm_and_reboot "Mode: IRAN
+Local (Iran) IP:   $iran_ip
+Remote (Foreign):  $foreign_ip
+SSH Port:          $ssh_port
+rc.local:          $RC_LOCAL"
         ;;
       2)
-        local foreign_ip iran_ip
-        foreign_ip="$(get_local_ipv4)"
-        echo "${C_GREEN}Detected Foreign server IP (local):${C_RESET} ${C_CYAN}${foreign_ip}${C_RESET}"
-        read -rp "Enter Iran server IP: " iran_ip
+        local foreign_local iran_ip
+        foreign_local="$(get_local_ipv4)"
+        echo "${C_GREEN}Detected Foreign server IP (local):${C_RESET} ${C_CYAN}${foreign_local}${C_RESET}"
 
-        if [[ -z "${iran_ip}" ]]; then
-          echo "${C_RED}ERROR:${C_RESET} Iran IP is empty."
-          read -rp "Press Enter to continue..."
-          continue
-        fi
+        iran_ip="$(prompt_ipv4 "Enter Iran server IPv4: ")"
 
-        write_rc_local_foreign "$iran_ip" "$foreign_ip"
-        reboot_now
+        write_rc_local_foreign "$iran_ip" "$foreign_local"
+
+        confirm_and_reboot "Mode: FOREIGN
+Local (Foreign) IP: $foreign_local
+Remote (Iran):      $iran_ip
+rc.local:           $RC_LOCAL"
         ;;
       3)
         echo "${C_BLUE}Pinging 10.10.187.2 ...${C_RESET}"
@@ -247,6 +373,7 @@ menu() {
         read -rp "Press Enter to continue..."
         ;;
       5)
+        # prints ONLY ONLINE/OFFLINE (colored)
         status_check
         read -rp "Press Enter to continue..."
         ;;
